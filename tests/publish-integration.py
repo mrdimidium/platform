@@ -15,6 +15,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 import urllib.request
 from collections.abc import Sequence
 from pathlib import Path
@@ -28,6 +29,11 @@ APK_TOOLS_URL = (
     "apk-tools-static-2.14.10-r0.apk"
 )
 APK_TOOLS_SHA256 = "c86e3822764e5fe19f41ce2e13553e48cac1ea4e74f858338e8d44bf0b616b61"
+
+
+def executable(path: Path, source: str) -> None:
+    path.write_text("#!/usr/bin/env python3\n" + source)
+    path.chmod(0o755)
 
 
 async def main(args: Sequence[str]) -> None:
@@ -141,6 +147,23 @@ apk:
         )
         gpg_private_key = private_gpg.read_text()
         apk_private_key = private_rsa.read_text()
+        source_date_epoch = str(int(time.time()))
+        for name in ("gpg", "openssl"):
+            command = shutil.which(name)
+            assert command is not None
+            executable(
+                binary / name,
+                f"""import os
+import sys
+if any(name.startswith("GITHUB_") for name in os.environ):
+    raise SystemExit("GitHub environment leaked to signer")
+if os.environ.get("S3_SECRET_ACCESS_KEY"):
+    raise SystemExit("S3 credentials leaked to signer")
+if os.environ.get("UNRELATED_SENTINEL"):
+    raise SystemExit("unrelated environment leaked to signer")
+os.execv({command!r}, [{command!r}, *sys.argv[1:]])
+""",
+            )
 
         async def package_version(version: str) -> None:
             environment = dict(os.environ)
@@ -150,6 +173,7 @@ apk:
                 GPG_KEY_ID=fingerprint,
                 APK_PRIVATE_KEY=apk_private_key,
                 PACKAGE_KEY_VERSION=key_version,
+                SOURCE_DATE_EPOCH=source_date_epoch,
             )
             await run.set(env=environment, inherit_env=False)(
                 "mise",
@@ -187,6 +211,8 @@ apk:
             GPG_KEY_ID=fingerprint,
             APK_PRIVATE_KEY=apk_private_key,
             PACKAGE_KEY_VERSION=key_version,
+            GITHUB_REPOSITORY="provider/repository",
+            UNRELATED_SENTINEL="must-not-leak",
         )
         publish_command = run.result.set(env=publish_environment, inherit_env=False)
 

@@ -14,6 +14,19 @@ from shellous import ResultError, sh
 
 run = sh.stdout(sh.INHERIT).stderr(sh.INHERIT)
 capture = sh.stderr(sh.INHERIT)
+BASE_ENVIRONMENT = (
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "SOURCE_DATE_EPOCH",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "TZ",
+    "XDG_CONFIG_HOME",
+)
 
 
 class TaskError(RuntimeError):
@@ -35,6 +48,13 @@ def required_env(name: str, task: str, purpose: str = "") -> str:
     raise TaskError(f"{task}: {name} is required{suffix}")
 
 
+def controlled_environment(additional: Sequence[str] = ()) -> dict[str, str]:
+    names = (*BASE_ENVIRONMENT, *additional)
+    environment = {name: os.environ[name] for name in names if os.environ.get(name)}
+    environment["PATH"] = os.environ.get("PATH", os.defpath)
+    return environment
+
+
 def task_main(
     task: str,
     main: Callable[[Sequence[str]], Awaitable[None]],
@@ -52,9 +72,15 @@ def task_main(
 
 
 class GPGSigning:
-    def __init__(self, task: str, work: Path):
+    def __init__(
+        self,
+        task: str,
+        work: Path,
+        environment: dict[str, str] | None = None,
+        gpg_command: str | Path | None = None,
+    ):
         self.task = task
-        require_command("gpg", task)
+        self.gpg_command = gpg_command or require_command("gpg", task)
         private_key = required_env("GPG_PRIVATE_KEY", task)
         self.passphrase = required_env("GPG_PASSPHRASE", task)
         self.key_id = required_env("GPG_KEY_ID", task)
@@ -64,20 +90,33 @@ class GPGSigning:
         self.private_key_file = work / "signing.asc"
         self.private_key_file.write_text(private_key)
         self.private_key_file.chmod(0o600)
-        self.environment = dict(os.environ)
+        self.environment = dict(os.environ if environment is None else environment)
         self.environment["GNUPGHOME"] = str(self.home)
-        self.environment.pop("GPG_PRIVATE_KEY", None)
-        self.environment.pop("GPG_PASSPHRASE", None)
-        self.environment.pop("APK_PRIVATE_KEY", None)
+        for name in (
+            "GPG_PRIVATE_KEY",
+            "GPG_PASSPHRASE",
+            "APK_PRIVATE_KEY",
+            "SIGNING_PRIVATE_KEY",
+            "NFPM_PASSPHRASE",
+            "NFPM_DEB_PASSPHRASE",
+            "NFPM_RPM_PASSPHRASE",
+        ):
+            self.environment.pop(name, None)
 
     @classmethod
-    async def create(cls, task: str, work: Path) -> GPGSigning:
-        signing = cls(task, work)
+    async def create(
+        cls,
+        task: str,
+        work: Path,
+        environment: dict[str, str] | None = None,
+        gpg_command: str | Path | None = None,
+    ) -> GPGSigning:
+        signing = cls(task, work, environment, gpg_command)
         command = run.set(env=signing.environment, inherit_env=False)
         await (
             f"{signing.passphrase}\n"
             | command(
-                "gpg",
+                signing.gpg_command,
                 "--batch",
                 "--yes",
                 "--pinentry-mode",
@@ -103,7 +142,7 @@ class GPGSigning:
     async def export_public_key(self, output: Path) -> None:
         command = run.set(env=self.environment, inherit_env=False)
         await command(
-            "gpg",
+            self.gpg_command,
             "--batch",
             "--yes",
             "--armor",
@@ -114,7 +153,7 @@ class GPGSigning:
     async def verify_public_bundle(self, bundle: Path) -> None:
         command = capture.set(env=self.environment, inherit_env=False)
         output = await command(
-            "gpg",
+            self.gpg_command,
             "--batch",
             "--with-colons",
             "--show-keys",
@@ -135,7 +174,7 @@ class GPGSigning:
         await (
             f"{self.passphrase}\n"
             | command(
-                "gpg",
+                self.gpg_command,
                 f"--default-key={self.key_id}",
                 "--batch",
                 "--yes",
@@ -151,7 +190,13 @@ class GPGSigning:
 
 
 class APKSigning:
-    def __init__(self, task: str, work: Path, key_name: str = "packages"):
+    def __init__(
+        self,
+        task: str,
+        work: Path,
+        key_name: str = "packages",
+        environment: dict[str, str] | None = None,
+    ):
         require_command("openssl", task)
         private_key = required_env("APK_PRIVATE_KEY", task, "for APK signing")
         self.key_name = key_name
@@ -159,10 +204,17 @@ class APKSigning:
         self.private_key_file = work / f"{key_name}.rsa"
         self.private_key_file.write_text(private_key)
         self.private_key_file.chmod(0o600)
-        self.environment = dict(os.environ)
-        self.environment.pop("APK_PRIVATE_KEY", None)
-        self.environment.pop("GPG_PRIVATE_KEY", None)
-        self.environment.pop("GPG_PASSPHRASE", None)
+        self.environment = dict(os.environ if environment is None else environment)
+        for name in (
+            "APK_PRIVATE_KEY",
+            "GPG_PRIVATE_KEY",
+            "GPG_PASSPHRASE",
+            "SIGNING_PRIVATE_KEY",
+            "NFPM_PASSPHRASE",
+            "NFPM_DEB_PASSPHRASE",
+            "NFPM_RPM_PASSPHRASE",
+        ):
+            self.environment.pop(name, None)
         self.environment["APK_SIGNING_KEY"] = str(self.private_key_file)
 
     async def export_public_key(self, output: Path) -> None:

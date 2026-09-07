@@ -34,7 +34,8 @@ Executable tasks live in [`tasks/`](tasks). Consuming projects include this
 directory with
 [mise remote Git includes](https://mise.jdx.dev/tasks/task-configuration.html#remote-git-includes)
 and pin the repository to a commit SHA. Task metadata installs pinned tools on
-demand; project toolchains and system packages remain in the consuming project's
+demand, while each task's explicit `--bootstrap` mode installs only its own
+APT or DNF dependencies. Project toolchains remain in the consuming project's
 `mise.toml`.
 
 Run `mise run <task> -- --help` for the complete command-line interface.
@@ -44,9 +45,15 @@ Run `mise run <task> -- --help` for the complete command-line interface.
 Builds only the requested nFPM packages (`deb`, `rpm`, `apk`) or portable
 archives (`tar.gz`, `zip`). The consuming project owns its nFPM configuration
 and staged files. DEB and RPM packages can be signed with the OpenPGP
-environment variables; APK supports `PACKAGE_KEY_VERSION` and APK signing keys.
+environment variables; signed builds require `SOURCE_DATE_EPOCH`, which is
+applied to every GPG and RPM signing step. APK supports `PACKAGE_KEY_VERSION`
+and APK signing keys. nFPM receives only a small allowlisted environment; raw
+keys, passphrases, and provider-specific CI variables are not forwarded.
+`--bootstrap` installs the native dependencies for exactly the requested
+formats and exits without building an artifact.
 
 ```console
+mise run package -- --bootstrap --update deb rpm apk zip
 mise run package -- --version VERSION --arch ARCH --output DIR deb rpm apk
 mise run package -- --archive-root DIR --archive-name NAME --output DIR tar.gz zip
 ```
@@ -58,18 +65,50 @@ Publishes selected package formats to the service and channel under
 S3 lock serializes repository metadata updates.
 
 ```console
+mise run publish -- --bootstrap --update deb rpm apk
 mise run publish -- --service SERVICE --channel CHANNEL --input DIR deb rpm apk
 ```
 
 Storage uses `S3_BUCKET`, `S3_ENDPOINT`, `S3_PUBLIC_URL`, `S3_ACCESS_KEY_ID`,
 and `S3_SECRET_ACCESS_KEY`. Signing uses `PACKAGE_KEY_VERSION`, the `GPG_*`
-variables, and `APK_PRIVATE_KEY`.
+variables, and `APK_PRIVATE_KEY`. Signing subprocesses receive an allowlisted
+environment without storage or CI-provider credentials.
+
+### `check`
+
+Runs contributor/signoff and licensing policy. The default `all` scope also
+runs Rust formatting, ShellCheck, Clippy, tests, optional project scripts, and
+LCOV coverage. `policy` is available to projects with a different build stack.
+
+```console
+mise run check
+mise run check -- policy
+mise run check -- --script tests/authorized-keys.sh
+```
+
+### `release-context`
+
+Resolves the Cargo version, Git revision and commit timestamp, release channel,
+and package version into a shell environment file. CI adapters pass source
+metadata explicitly; the task does not read provider-specific environment
+variables. `--publish` validates only that the source ref is publishable;
+package signing and storage credentials are validated by `package` and
+`publish`. Provider-specific authentication remains in the calling adapter.
+
+```console
+mise run release-context -- \
+  --package SERVICE --source-ref refs/heads/main --revision SHA \
+  --build-number 42 --publish --output release.env
+```
 
 ### `container`
 
 Builds one or more tagged OCI images with Docker Buildx. Authentication and
 release policy stay with the caller; use `--push` or `--load` to export the
 result.
+
+Cache backends are explicit `--cache-from` and `--cache-to` values rather than
+being inferred from a CI provider.
 
 ```console
 mise run container -- --context . --file Dockerfile --platform linux/amd64,linux/arm64 --tag REGISTRY/IMAGE:TAG --push
@@ -85,13 +124,21 @@ needed.
 mise run chart -- --chart charts/service --version VERSION --app-version VERSION --output dist/charts --push oci://REGISTRY/charts
 ```
 
-### `licenses`
+### `github-release`
 
-Checks canonical SPDX headers and REUSE metadata. Rust repositories are also
-checked with `cargo deny`.
+Finalizes an already published GitHub release: creates or edits the release,
+replaces its assets, optionally promotes an immutable image to a mutable alias,
+and updates a nightly tag only after every preceding operation succeeds. It
+accepts repository and run metadata as explicit arguments, does not read
+runner-specific variables, and assumes `gh` and Docker authentication were
+completed by the caller.
 
 ```console
-mise run licenses
+mise run github-release -- \
+  --repository OWNER/REPOSITORY --channel nightly --tag nightly \
+  --title nightly --revision SHA --version VERSION \
+  --checks-url URL --asset dist/*.deb dist/*.rpm \
+  --image REGISTRY/IMAGE:VERSION --image-alias REGISTRY/IMAGE:nightly
 ```
 
 ### `licenses-json`
@@ -104,16 +151,6 @@ with an SPDX ID, name, and path relative to `Cargo.toml`.
 
 ```console
 mise run licenses-json -- --manifest-path Cargo.toml --output licenses.json --target x86_64-unknown-linux-gnu
-```
-
-### `signoff`
-
-Checks contributor identities, matching `Signed-off-by` trailers, the
-`CLA-Version` declared by each commit's `CLA.md`, and registration of author and
-committer addresses in `.mailmap`.
-
-```console
-mise run signoff
 ```
 
 ## Contributing

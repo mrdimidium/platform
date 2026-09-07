@@ -7,7 +7,13 @@ import re
 import shutil
 from pathlib import Path
 
-from .common import APKSigning, GPGSigning, TaskError, required_env
+from .common import (
+    APKSigning,
+    GPGSigning,
+    TaskError,
+    controlled_environment,
+    required_env,
+)
 from .storage import S3Storage
 
 TASK = "publish"
@@ -26,6 +32,7 @@ class Repository:
         if not KEY_VERSION.fullmatch(self.key_version):
             raise TaskError(f"{TASK}: invalid PACKAGE_KEY_VERSION: {self.key_version}")
         self.storage = S3Storage(TASK, service)
+        self.signing_environment = controlled_environment()
         self.gpg = None
         self.gpg_public_key = None
         self.apk_signing = None
@@ -58,7 +65,9 @@ class Repository:
             shutil.copy2(source, destination)
 
     async def setup_openpgp(self) -> None:
-        self.gpg = await GPGSigning.create(TASK, self.work)
+        self.gpg = await GPGSigning.create(
+            TASK, self.work, environment=self.signing_environment
+        )
         current = self.work / "current-packages.gpg"
         await self.gpg.export_public_key(current)
         self.check_public_key(current, f"keys/packages.{self.key_version}.gpg")
@@ -71,7 +80,9 @@ class Repository:
 
     async def setup_rsa(self) -> None:
         key_name = f"packages.{self.key_version}"
-        self.apk_signing = APKSigning(TASK, self.work, key_name)
+        self.apk_signing = APKSigning(
+            TASK, self.work, key_name, environment=self.signing_environment
+        )
         current = self.work / self.apk_signing.public_key_name
         await self.apk_signing.export_public_key(current)
         self.check_public_key(

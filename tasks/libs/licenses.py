@@ -1,28 +1,17 @@
-#!/usr/bin/env -S pipx run --backend pip
 # SPDX-FileCopyrightText: 2026 Nikolay Govorov
 # SPDX-License-Identifier: Apache-2.0
-# fmt: off
-#MISE description="Verify repository licensing metadata"
-#MISE tools={"pipx"="1.16.7","python"="3.14.7","pipx:reuse"="6.2.0","aqua:EmbarkStudios/cargo-deny"="0.19.0"}
-# fmt: on
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["shellous==0.42.0"]
-# ///
 
 from __future__ import annotations
 
-import argparse
 import re
 import sys
-from collections.abc import Sequence
 from pathlib import Path
 
 sys.dont_write_bytecode = True
 
-from libs.common import TaskError, capture, run, task_main
+from .common import TaskError, capture, run
 
-TASK = "licenses"
+TASK = "check"
 HEADER = (
     r"^((<!--|#|//|/\*|\*)[[:space:]]*)?"
     r"(Copyright[[:space:]]+(\([cC]\)|©)|SPDX-FileCopyrightText:)"
@@ -83,13 +72,8 @@ async def check_copyright_headers() -> None:
         raise TaskError(f"{TASK}: invalid copyright headers")
 
 
-async def main(args: Sequence[str]) -> None:
-    argparse.ArgumentParser(prog="mise run licenses --").parse_args(args)
+async def check() -> None:
     await check_copyright_headers()
     await run("reuse", "lint")
     if Path("Cargo.toml").is_file():
         await run("cargo-deny", "check")
-
-
-if __name__ == "__main__":
-    task_main(TASK, main, sys.argv[1:])

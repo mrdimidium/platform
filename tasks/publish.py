@@ -23,6 +23,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 
 from libs.common import TaskError, task_main
+from libs.native import bootstrap as bootstrap_native
 
 if test_path := os.environ.get("PUBLISH_TEST_PYTHONPATH"):
     sys.path.insert(0, test_path)
@@ -32,18 +33,55 @@ from libs.repository import Repository
 TASK = "publish"
 FORMATS = {"deb", "rpm", "apk"}
 SAFE_SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+NATIVE_DEPENDENCIES = {
+    "apt": {
+        "apk": ("openssl", "tar"),
+        "deb": ("apt-utils", "dpkg", "gnupg", "gzip"),
+        "rpm": ("createrepo-c", "gnupg", "rpm"),
+    },
+    "dnf": {
+        "apk": ("openssl", "tar"),
+        "rpm": ("createrepo_c", "gnupg2", "rpm"),
+    },
+}
 
 
 async def main(args: Sequence[str]) -> None:
     command = argparse.ArgumentParser(
         prog="mise run publish --",
-        usage="%(prog)s --service NAME --channel CHANNEL --input DIR deb|rpm|apk...",
+        usage=(
+            "%(prog)s [--bootstrap [--update|--dry-run]] "
+            "[--service NAME --channel CHANNEL --input DIR] deb|rpm|apk..."
+        ),
     )
-    command.add_argument("--service", required=True)
-    command.add_argument("--channel", required=True)
-    command.add_argument("--input", required=True, type=Path)
+    command.add_argument(
+        "--bootstrap",
+        action="store_true",
+        help="install native dependencies for the requested formats and exit",
+    )
+    command.add_argument("--update", action="store_true")
+    command.add_argument("--dry-run", action="store_true")
+    command.add_argument("--service")
+    command.add_argument("--channel")
+    command.add_argument("--input", type=Path)
     command.add_argument("formats", nargs="+", choices=sorted(FORMATS))
     arguments = command.parse_args(args)
+    if arguments.update and arguments.dry_run:
+        command.error("--update and --dry-run are mutually exclusive")
+    if arguments.bootstrap:
+        await bootstrap_native(
+            TASK,
+            arguments.formats,
+            NATIVE_DEPENDENCIES,
+            update=arguments.update,
+            dry_run=arguments.dry_run,
+        )
+        return
+    if arguments.update or arguments.dry_run:
+        command.error("--update and --dry-run require --bootstrap")
+    for name in ("service", "channel", "input"):
+        if getattr(arguments, name) is None:
+            command.error(f"--{name} is required unless --bootstrap is used")
     for label, value in (
         ("service name", arguments.service),
         ("channel", arguments.channel),

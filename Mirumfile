@@ -56,20 +56,21 @@ if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
     fi
 fi
 
-# Legal checks
-mise run signoff
-mise run licenses
+mise bootstrap --locked --yes
+mise run package -- --bootstrap --update deb rpm apk tar.gz zip
+mise run publish -- --bootstrap deb rpm apk
 
-# Static checks and tests
-mise bootstrap --locked --yes --update
+# Shared policy, static checks, tests, and coverage
+mise run check
 mise exec -- ruff check tasks tests
 mise exec -- ruff format --check tasks tests
-mise exec -- cargo fmt --check
-mise exec -- cargo test --workspace
-mise exec -- cargo clippy --workspace --all-targets -- -D warnings
 
+mise exec -- tests/check.py
+mise exec -- tests/github-release.py
 mise exec -- tests/licenses-json.py
+mise exec -- tests/native-bootstrap.py
 mise exec -- tests/oci-tasks.py
 mise exec -- tests/package.py
 mise exec -- tests/package-integration.py
 mise exec -- tests/publish-integration.py
+mise exec -- tests/release-context.py

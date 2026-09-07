@@ -1,30 +1,20 @@
-#!/usr/bin/env -S pipx run --backend pip
 # SPDX-FileCopyrightText: 2026 Nikolay Govorov
 # SPDX-License-Identifier: Apache-2.0
-# fmt: off
-#MISE description="Verify contributor identities and CLA acceptance trailers"
-#MISE tools={"pipx"="1.16.7","python"="3.14.7"}
-# fmt: on
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["shellous==0.42.0"]
-# ///
 
 from __future__ import annotations
 
-import argparse
 import os
 import re
 import sys
-from collections.abc import Sequence
 from pathlib import Path
 
 sys.dont_write_bytecode = True
 
-from libs.common import TaskError, capture, task_main
 from shellous import sh
 
-TASK = "signoff"
+from .common import TaskError, capture
+
+TASK = "check"
 
 
 def configured_values(path: Path) -> set[str]:
@@ -67,14 +57,13 @@ async def git(*arguments: str) -> str:
     return await capture("git", arguments)
 
 
-async def main(args: Sequence[str]) -> None:
-    argparse.ArgumentParser(prog="mise run signoff --").parse_args(args)
+async def check() -> None:
     root = Path((await git("rev-parse", "--show-toplevel")).strip())
     os.chdir(root)
 
-    task_directory = Path(__file__).resolve().parent
-    approved_emails_file = task_directory.parent / "config/signoff-approved-emails"
-    unsupported_commits_file = task_directory.parent / "config/cla-unsupported-commits"
+    platform_root = Path(__file__).resolve().parents[2]
+    approved_emails_file = platform_root / "config/signoff-approved-emails"
+    unsupported_commits_file = platform_root / "config/cla-unsupported-commits"
 
     cla_file = Path("CLA.md")
     if not cla_file.is_file():
@@ -202,7 +191,3 @@ async def main(args: Sequence[str]) -> None:
     if missing:
         print("All authors and committers must be listed in .mailmap")
         raise SystemExit(1)
-
-
-if __name__ == "__main__":
-    task_main(TASK, main, sys.argv[1:])

@@ -38,46 +38,55 @@ async def main(args: Sequence[str]) -> None:
         binary.mkdir()
         (stage / "sub").mkdir(parents=True)
         output.mkdir()
+        rpm_config = work / "rpm-config-source"
+        rpm_config.mkdir()
+        (rpm_config / "macros").write_text("%fixture 1\n")
         (stage / "tool").write_text("payload\n")
         (stage / "sub/file").write_text("nested\n")
         outside = work / "outside"
         outside.write_text("outside\n")
         (stage / "outside-link").symlink_to(outside)
+        log = work / "package.log"
 
         executable(
             binary / "nfpm",
-            """import os
+            f"""import os
 import sys
 from pathlib import Path
 secrets = (
     "GPG_PRIVATE_KEY", "APK_PRIVATE_KEY", "SIGNING_PRIVATE_KEY",
-    "NFPM_PASSPHRASE",
+    "NFPM_PASSPHRASE", "NFPM_DEB_PASSPHRASE", "NFPM_RPM_PASSPHRASE",
 )
 if any(os.environ.get(name) for name in secrets):
     print("raw private key leaked to nFPM", file=sys.stderr)
+    raise SystemExit(1)
+if any(name.startswith("GITHUB_") for name in os.environ):
+    print("GitHub environment leaked to nFPM", file=sys.stderr)
+    raise SystemExit(1)
+if os.environ.get("UNRELATED_SENTINEL"):
+    print("unrelated environment leaked to nFPM", file=sys.stderr)
     raise SystemExit(1)
 arguments = sys.argv[1:]
 config = Path(arguments[arguments.index("--config") + 1])
 packager = arguments[arguments.index("--packager") + 1]
 target = Path(arguments[arguments.index("--target") + 1])
-with Path(os.environ["PACKAGE_TEST_LOG"]).open("a") as stream:
-    stream.write(f"ARCH={os.environ['ARCH']}\\n")
-    stream.write(f"VERSION={os.environ['VERSION']}\\n")
-    stream.write(f"GPG_KEY_ID={os.environ.get('GPG_KEY_ID', '')}\\n")
-    stream.write(f"{packager}\\n")
+with Path({str(log)!r}).open("a") as stream:
+    stream.write(f"ARCH={{os.environ['ARCH']}}\\n")
+    stream.write(f"VERSION={{os.environ['VERSION']}}\\n")
+    stream.write(f"GPG_KEY_ID={{os.environ.get('GPG_KEY_ID', '')}}\\n")
+    stream.write(f"{{packager}}\\n")
     for line in config.read_text().splitlines():
         if line.startswith("key_name:"):
-            stream.write(f"{line}\\n")
-(target / f"test.{packager}").touch()
+            stream.write(f"{{line}}\\n")
+(target / f"test.{{packager}}").touch()
 """,
         )
         executable(
             binary / "gpg",
-            """import os
-import sys
+            f"""import sys
 from pathlib import Path
-with Path(os.environ["PACKAGE_TEST_LOG"]).open("a") as stream:
-    stream.write("gpg\\n")
+with Path({str(log)!r}).open("a") as stream:
+    stream.write(f"gpg {{' '.join(sys.argv[1:])}}\\n")
 arguments = sys.argv[1:]
 if "-o" in arguments:
     Path(arguments[arguments.index("-o") + 1]).write_text("signature")
@@ -86,13 +95,27 @@ if "-o" in arguments:
         for name in ("debsigs", "rpmsign"):
             executable(
                 binary / name,
-                """import os
+                f"""import os
+import subprocess
 import sys
 from pathlib import Path
-with Path(os.environ["PACKAGE_TEST_LOG"]).open("a") as stream:
-    stream.write(f"{Path(sys.argv[0]).name}\\n")
+name = Path(sys.argv[0]).name
+with Path({str(log)!r}).open("a") as stream:
+    stream.write(f"{{name}}\\n")
+    if name == "rpmsign":
+        macros = Path(os.environ["RPM_CONFIGDIR"]) / "macros"
+        stream.write(f"rpm-macros={{macros.read_text().strip()}}\\n")
+subprocess.run(["gpg", name], check=True)
 """,
             )
+        executable(
+            binary / "rpm",
+            f"""import sys
+if sys.argv[1:] != ["--eval", "%{{_rpmconfigdir}}"]:
+    raise SystemExit(1)
+print({str(rpm_config)!r})
+""",
+        )
         executable(
             binary / "openssl",
             """import sys
@@ -104,11 +127,12 @@ Path(arguments[arguments.index("-out") + 1]).write_text("public key\\n")
 
         config = work / "nfpm.yaml"
         config.write_text("name: test\n")
-        log = work / "package.log"
         environment = dict(os.environ)
         environment.update(
             PATH=f"{binary}:{environment['PATH']}",
-            PACKAGE_TEST_LOG=str(log),
+            GITHUB_REPOSITORY="provider/repository",
+            GITHUB_TOKEN="provider-token",
+            UNRELATED_SENTINEL="must-not-leak",
         )
         command = run.set(env=environment, inherit_env=False)
         package = root / "tasks/package.py"
@@ -156,6 +180,11 @@ Path(arguments[arguments.index("-out") + 1]).write_text("public key\\n")
             GPG_PASSPHRASE="passphrase",
             GPG_KEY_ID="0123456789ABCDEF0123456789ABCDEF01234567",
             APK_PRIVATE_KEY="apk-private",
+            SOURCE_DATE_EPOCH="1700000000",
+            SIGNING_PRIVATE_KEY="raw-signing-private",
+            NFPM_PASSPHRASE="raw-passphrase",
+            NFPM_DEB_PASSPHRASE="raw-deb-passphrase",
+            NFPM_RPM_PASSPHRASE="raw-rpm-passphrase",
         )
         await run.set(env=signing_environment, inherit_env=False)(
             package,
@@ -177,12 +206,36 @@ Path(arguments[arguments.index("-out") + 1]).write_text("public key\\n")
         assert (output / "test.rsa.pub").is_file()
         log_lines = log.read_text().splitlines()
         for expected in (
-            "gpg",
             "debsigs",
             "rpmsign",
             "GPG_KEY_ID=89ABCDEF01234567",
         ):
             assert expected in log_lines
+        gpg_lines = [line for line in log_lines if line.startswith("gpg ")]
+        assert gpg_lines
+        assert all("--faked-system-time 1700000000!" in line for line in gpg_lines), (
+            gpg_lines
+        )
+        assert "%_gpg_sign_cmd_extra_args --faked-system-time 1700000000!" in log_lines
+
+        invalid_timestamp_environment = dict(
+            signing_environment, SOURCE_DATE_EPOCH="not-a-timestamp"
+        )
+        result = await run.result.set(
+            env=invalid_timestamp_environment, inherit_env=False
+        )(
+            package,
+            "--config",
+            config,
+            "--version",
+            "1.2.3",
+            "--arch",
+            "amd64",
+            "--output",
+            output,
+            "deb",
+        ).stderr(sh.DEVNULL)
+        assert result.exit_code != 0
 
         apk_environment = dict(environment, APK_PRIVATE_KEY="apk-private")
         await run.set(env=apk_environment, inherit_env=False)(

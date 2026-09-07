@@ -27,16 +27,36 @@ from libs.common import (
     APKSigning,
     GPGSigning,
     TaskError,
+    capture,
+    controlled_environment,
     require_command,
+    required_env,
     run,
     task_main,
 )
+from libs.native import bootstrap as bootstrap_native
 
 TASK = "package"
 SYSTEM_FORMATS = {"deb", "rpm", "apk"}
 ARCHIVE_FORMATS = {"tar.gz", "zip"}
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 SAFE_KEY_VERSION = re.compile(r"^[0-9]{4}$")
+SAFE_TIMESTAMP = re.compile(r"^[0-9]+$")
+NATIVE_DEPENDENCIES = {
+    "apt": {
+        "apk": ("openssl", "tar"),
+        "deb": ("debsigs", "gnupg"),
+        "rpm": ("gnupg", "rpm"),
+        "tar.gz": ("gzip", "tar"),
+        "zip": ("zip",),
+    },
+    "dnf": {
+        "apk": ("openssl", "tar"),
+        "rpm": ("gnupg2", "rpm", "rpm-sign"),
+        "tar.gz": ("gzip", "tar"),
+        "zip": ("zip",),
+    },
+}
 
 
 def validate(arguments: argparse.Namespace, command: argparse.ArgumentParser) -> None:
@@ -77,12 +97,61 @@ async def create_archive(
     await run.set(cwd=root)("zip", "-qry", destination, ".")
 
 
+async def reproducible_signing_environment(
+    environment: dict[str, str], work: Path, formats: set[str]
+) -> tuple[dict[str, str], Path]:
+    source_date_epoch = required_env(
+        "SOURCE_DATE_EPOCH", TASK, "for reproducible package signing"
+    )
+    if not SAFE_TIMESTAMP.fullmatch(source_date_epoch):
+        raise TaskError(f"{TASK}: invalid SOURCE_DATE_EPOCH: {source_date_epoch}")
+
+    reproducible = dict(environment)
+    reproducible["SOURCE_DATE_EPOCH"] = source_date_epoch
+    reproducible["REAL_GPG"] = require_command("gpg", TASK)
+    wrapper_directory = work / "repro-bin"
+    wrapper_directory.mkdir()
+    wrapper = wrapper_directory / "gpg"
+    wrapper.write_text(
+        '#!/bin/sh\nexec "$REAL_GPG" --faked-system-time "${SOURCE_DATE_EPOCH}!" "$@"\n'
+    )
+    wrapper.chmod(0o755)
+    reproducible["PATH"] = f"{wrapper_directory}:{reproducible['PATH']}"
+
+    if "rpm" in formats:
+        require_command("rpm", TASK)
+        rpm_config_source = Path(
+            (
+                await capture.set(env=environment, inherit_env=False)(
+                    "rpm", "--eval", "%{_rpmconfigdir}"
+                )
+            ).strip()
+        )
+        if not rpm_config_source.is_dir():
+            raise TaskError(
+                f"{TASK}: RPM configuration directory not found: {rpm_config_source}"
+            )
+        rpm_config = work / "rpm-config"
+        shutil.copytree(rpm_config_source, rpm_config)
+        with (rpm_config / "macros").open("a") as stream:
+            stream.write(
+                f"\n%_gpg_sign_cmd_extra_args --faked-system-time "
+                f"{source_date_epoch}!\n"
+            )
+        reproducible["RPM_CONFIGDIR"] = str(rpm_config)
+
+    return reproducible, wrapper
+
+
 async def sign_package(
-    package_format: str, package: Path, signing: GPGSigning | None
+    package_format: str,
+    package: Path,
+    signing: GPGSigning | None,
+    environment: dict[str, str],
 ) -> None:
     if signing is None or package_format not in {"deb", "rpm"}:
         return
-    command = run.set(env=signing.environment, inherit_env=False)
+    command = run.set(env=environment, inherit_env=False)
     if package_format == "deb":
         require_command("debsigs", TASK)
         await command(
@@ -106,16 +175,24 @@ async def main(args: Sequence[str]) -> None:
     command = argparse.ArgumentParser(
         prog="mise run package --",
         usage=(
-            "%(prog)s --output DIR [--config FILE] "
+            "%(prog)s [--bootstrap [--update|--dry-run]] "
+            "[--output DIR] [--config FILE] "
             "[--version VERSION --arch ARCH] [--apk-public-key FILE] "
             "[--archive-root DIR --archive-name NAME] "
             "deb|rpm|apk|tar.gz|zip..."
         ),
     )
+    command.add_argument(
+        "--bootstrap",
+        action="store_true",
+        help="install native dependencies for the requested formats and exit",
+    )
+    command.add_argument("--update", action="store_true")
+    command.add_argument("--dry-run", action="store_true")
     command.add_argument("--config", default="nfpm.yaml", type=Path)
     command.add_argument("--version")
     command.add_argument("--arch")
-    command.add_argument("--output", required=True, type=Path)
+    command.add_argument("--output", type=Path)
     command.add_argument("--archive-root", type=Path)
     command.add_argument("--archive-name")
     command.add_argument("--apk-public-key")
@@ -123,6 +200,21 @@ async def main(args: Sequence[str]) -> None:
         "formats", nargs="+", choices=sorted(SYSTEM_FORMATS | ARCHIVE_FORMATS)
     )
     arguments = command.parse_args(args)
+    if arguments.update and arguments.dry_run:
+        command.error("--update and --dry-run are mutually exclusive")
+    if arguments.bootstrap:
+        await bootstrap_native(
+            TASK,
+            arguments.formats,
+            NATIVE_DEPENDENCIES,
+            update=arguments.update,
+            dry_run=arguments.dry_run,
+        )
+        return
+    if arguments.update or arguments.dry_run:
+        command.error("--update and --dry-run require --bootstrap")
+    if arguments.output is None:
+        command.error("--output is required unless --bootstrap is used")
     validate(arguments, command)
 
     arguments.output.mkdir(parents=True, exist_ok=True)
@@ -131,16 +223,7 @@ async def main(args: Sequence[str]) -> None:
 
     with tempfile.TemporaryDirectory(prefix="package-") as directory:
         work = Path(directory)
-        environment = dict(os.environ)
-        for name in (
-            "GPG_PRIVATE_KEY",
-            "APK_PRIVATE_KEY",
-            "SIGNING_PRIVATE_KEY",
-            "NFPM_PASSPHRASE",
-            "NFPM_DEB_PASSPHRASE",
-            "NFPM_RPM_PASSPHRASE",
-        ):
-            environment.pop(name, None)
+        environment = controlled_environment()
         config = arguments.config
         if "apk" in formats and "${PACKAGE_KEY_VERSION}" in config.read_text():
             key_version = os.environ.get("PACKAGE_KEY_VERSION", "")
@@ -157,13 +240,16 @@ async def main(args: Sequence[str]) -> None:
 
         gpg_signing: GPGSigning | None = None
         if formats & {"deb", "rpm"} and os.environ.get("GPG_PRIVATE_KEY"):
-            gpg_signing = await GPGSigning.create(TASK, work)
+            environment, gpg_command = await reproducible_signing_environment(
+                environment, work, formats
+            )
+            gpg_signing = await GPGSigning.create(TASK, work, environment, gpg_command)
             await gpg_signing.prime_agent()
             environment = gpg_signing.package_environment()
 
         apk_signing: APKSigning | None = None
         if "apk" in formats and os.environ.get("APK_PRIVATE_KEY"):
-            apk_signing = APKSigning(TASK, work)
+            apk_signing = APKSigning(TASK, work, environment=environment)
             environment["APK_SIGNING_KEY"] = str(apk_signing.private_key_file)
         elif os.environ.get("APK_SIGNING_KEY"):
             environment["APK_SIGNING_KEY"] = os.environ["APK_SIGNING_KEY"]
@@ -209,7 +295,9 @@ async def main(args: Sequence[str]) -> None:
                     raise TaskError(
                         f"{TASK}: nFPM produced an unexpected number of packages"
                     )
-                await sign_package(package_format, packages[0], gpg_signing)
+                await sign_package(
+                    package_format, packages[0], gpg_signing, package_environment
+                )
                 shutil.move(packages[0], output / packages[0].name)
             else:
                 await create_archive(

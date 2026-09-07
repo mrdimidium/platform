@@ -33,7 +33,8 @@ async def main(args: Sequence[str]) -> None:
     command.add_argument("--build-arg", action="append", default=[])
     command.add_argument("--label", action="append", default=[])
     command.add_argument("--tag", action="append", required=True)
-    command.add_argument("--cache-scope")
+    command.add_argument("--cache-from", action="append", default=[])
+    command.add_argument("--cache-to", action="append", default=[])
     command.add_argument("--provenance", choices=("true", "false"), default="true")
     command.add_argument("--sbom", choices=("true", "false"), default="true")
     command.add_argument("--push", action="store_true")
@@ -83,15 +84,10 @@ async def main(args: Sequence[str]) -> None:
         build.extend(("--label", value))
     for tag in arguments.tag:
         build.extend(("--tag", tag))
-    if arguments.cache_scope:
-        build.extend(
-            (
-                "--cache-from",
-                f"type=gha,scope={arguments.cache_scope}",
-                "--cache-to",
-                f"type=gha,mode=max,scope={arguments.cache_scope}",
-            )
-        )
+    for cache in arguments.cache_from:
+        build.extend(("--cache-from", cache))
+    for cache in arguments.cache_to:
+        build.extend(("--cache-to", cache))
     if arguments.push:
         build.append("--push")
     elif arguments.load:
