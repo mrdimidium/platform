@@ -13,9 +13,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import shutil
 import sys
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -34,6 +37,8 @@ TASK = "github-release"
 SAFE_REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SAFE_REVISION = re.compile(r"^(?:[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$")
 SAFE_TAG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
+SAFE_ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
+CHECKSUM_ASSET = "SHA256SUMS"
 PROVIDER_ENVIRONMENT = (
     "DOCKER_CERT_PATH",
     "DOCKER_CONFIG",
@@ -46,6 +51,28 @@ PROVIDER_ENVIRONMENT = (
     "GH_TOKEN",
     "NO_COLOR",
 )
+
+
+def named_binary(value: str) -> tuple[str, Path]:
+    name, separator, path = value.partition("=")
+    if not separator or not SAFE_ASSET_NAME.fullmatch(name) or not path:
+        raise argparse.ArgumentTypeError("expected NAME=PATH with a safe asset name")
+    return name, Path(path)
+
+
+def stage_binaries(directory: Path, binaries: Sequence[tuple[str, Path]]) -> list[Path]:
+    staged: list[Path] = []
+    checksums: list[str] = []
+    for name, source in sorted(binaries):
+        target = directory / name
+        shutil.copyfile(source, target)
+        with target.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        staged.append(target)
+        checksums.append(f"{digest}  {name}\n")
+    checksum = directory / CHECKSUM_ASSET
+    checksum.write_text("".join(checksums))
+    return [*staged, checksum]
 
 
 def release_notes(channel: str, version: str, checks_url: str) -> str:
@@ -102,6 +129,15 @@ async def main(args: Sequence[str]) -> None:
         default=[],
         type=Path,
     )
+    command.add_argument(
+        "--binary",
+        action="extend",
+        nargs="+",
+        default=[],
+        metavar="NAME=PATH",
+        type=named_binary,
+        help="add named binaries and SHA256SUMS to the release",
+    )
     command.add_argument("--image")
     command.add_argument("--image-alias")
     arguments = command.parse_args(args)
@@ -123,8 +159,15 @@ async def main(args: Sequence[str]) -> None:
     if any(not asset.is_file() for asset in arguments.asset):
         missing = next(asset for asset in arguments.asset if not asset.is_file())
         raise TaskError(f"{TASK}: asset not found: {missing}")
+    if any(not path.is_file() for _, path in arguments.binary):
+        missing = next(path for _, path in arguments.binary if not path.is_file())
+        raise TaskError(f"{TASK}: binary not found: {missing}")
     names = [asset.name for asset in arguments.asset]
-    if len(names) != len(set(names)):
+    binary_names = [name for name, _ in arguments.binary]
+    release_names = [*names, *binary_names]
+    if arguments.binary:
+        release_names.append(CHECKSUM_ASSET)
+    if len(release_names) != len(set(release_names)):
         command.error("release asset names must be unique")
 
     require_command("gh", TASK)
@@ -134,62 +177,67 @@ async def main(args: Sequence[str]) -> None:
     execute = run.set(env=environment, inherit_env=False)
     notes = release_notes(arguments.channel, arguments.version, arguments.checks_url)
 
-    assets = await existing_assets(environment, arguments.repository, arguments.tag)
-    if assets is None:
-        create: list[str | Path] = [
-            "gh",
-            "release",
-            "create",
-            arguments.tag,
-            "--repo",
-            arguments.repository,
-            "--title",
-            arguments.title,
-            "--notes",
-            notes,
-        ]
-        if arguments.channel == "nightly":
-            create.extend(("--target", arguments.revision, "--prerelease"))
-        else:
-            create.append("--verify-tag")
-        await execute(create)
-    else:
-        for asset in assets:
-            await execute(
+    with tempfile.TemporaryDirectory(prefix="github-release-") as directory:
+        release_assets = list(arguments.asset)
+        if arguments.binary:
+            release_assets.extend(stage_binaries(Path(directory), arguments.binary))
+
+        assets = await existing_assets(environment, arguments.repository, arguments.tag)
+        if assets is None:
+            create: list[str | Path] = [
                 "gh",
                 "release",
-                "delete-asset",
+                "create",
                 arguments.tag,
-                asset,
                 "--repo",
                 arguments.repository,
-                "--yes",
-            )
-        edit: list[str] = [
+                "--title",
+                arguments.title,
+                "--notes",
+                notes,
+            ]
+            if arguments.channel == "nightly":
+                create.extend(("--target", arguments.revision, "--prerelease"))
+            else:
+                create.append("--verify-tag")
+            await execute(create)
+        else:
+            for asset in assets:
+                await execute(
+                    "gh",
+                    "release",
+                    "delete-asset",
+                    arguments.tag,
+                    asset,
+                    "--repo",
+                    arguments.repository,
+                    "--yes",
+                )
+            edit: list[str] = [
+                "gh",
+                "release",
+                "edit",
+                arguments.tag,
+                "--repo",
+                arguments.repository,
+                "--title",
+                arguments.title,
+                "--notes",
+                notes,
+            ]
+            if arguments.channel == "nightly":
+                edit.append("--prerelease")
+            await execute(edit)
+
+        await execute(
             "gh",
             "release",
-            "edit",
+            "upload",
             arguments.tag,
+            release_assets,
             "--repo",
             arguments.repository,
-            "--title",
-            arguments.title,
-            "--notes",
-            notes,
-        ]
-        if arguments.channel == "nightly":
-            edit.append("--prerelease")
-        await execute(edit)
-
-    await execute(
-        "gh",
-        "release",
-        "upload",
-        arguments.tag,
-        arguments.asset,
-        "--repo",
-        arguments.repository,
-    )
+        )
 
     if arguments.image:
         await execute(

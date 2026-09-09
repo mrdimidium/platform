@@ -9,8 +9,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
+import shutil
 import sys
 import tempfile
 from collections.abc import Sequence
@@ -48,13 +50,20 @@ async def main(args: Sequence[str]) -> None:
         assets.mkdir()
         first_asset = assets / "service.deb"
         second_asset = assets / "service.rpm"
+        amd64_binary = work / "binaries/amd64/service"
+        arm64_binary = work / "binaries/arm64/service"
         first_asset.write_text("deb\n")
         second_asset.write_text("rpm\n")
+        amd64_binary.parent.mkdir(parents=True)
+        arm64_binary.parent.mkdir(parents=True)
+        amd64_binary.write_text("amd64 binary\n")
+        arm64_binary.write_text("arm64 binary\n")
 
         executable(
             binary / "gh",
             f"""import json
 import os
+import shutil
 import sys
 from pathlib import Path
 arguments = sys.argv[1:]
@@ -75,6 +84,12 @@ elif arguments[:2] == ["release", "create"]:
     tag = arguments[2]
     (state / f"release-{{tag}}").touch()
     (state / f"ref-{{tag}}").touch()
+elif arguments[:2] == ["release", "upload"]:
+    uploaded = state / "uploaded"
+    uploaded.mkdir(exist_ok=True)
+    for value in arguments[3:arguments.index("--repo")]:
+        source = Path(value)
+        shutil.copyfile(source, uploaded / source.name)
 elif arguments[:2] == ["api", "repos/example/service/git/ref/tags/nightly"]:
     raise SystemExit(0 if (state / "ref-nightly").exists() else 1)
 """,
@@ -123,6 +138,9 @@ with Path({str(log)!r}).open("a") as stream:
             "--asset",
             first_asset,
             second_asset,
+            "--binary",
+            f"service-linux-amd64={amd64_binary}",
+            f"service-linux-arm64={arm64_binary}",
             "--image",
             "ghcr.io/example/service:1.2.3-nightly.1700000000",
             "--image-alias",
@@ -149,8 +167,25 @@ with Path({str(log)!r}).open("a") as stream:
             if entry[1:4] == ["api", "--method", "PATCH"]
         )
         assert upload_index < docker_index < patch_index
+        uploaded = state / "uploaded"
+        assert sorted(path.name for path in uploaded.iterdir()) == [
+            "SHA256SUMS",
+            "service-linux-amd64",
+            "service-linux-arm64",
+            "service.deb",
+            "service.rpm",
+        ]
+        expected_checksums = "".join(
+            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {name}\n"
+            for name, path in (
+                ("service-linux-amd64", amd64_binary),
+                ("service-linux-arm64", arm64_binary),
+            )
+        )
+        assert (uploaded / "SHA256SUMS").read_text() == expected_checksums
 
         log.write_text("")
+        shutil.rmtree(uploaded)
         (state / "release-v1.2.3").touch()
         await command(
             sys.executable,
@@ -170,6 +205,9 @@ with Path({str(log)!r}).open("a") as stream:
             "--asset",
             first_asset,
             second_asset,
+            "--binary",
+            f"service-linux-amd64={amd64_binary}",
+            f"service-linux-arm64={arm64_binary}",
         )
         commands = entries(log)
         deleted = [
@@ -179,6 +217,14 @@ with Path({str(log)!r}).open("a") as stream:
         edit = next(entry for entry in commands if entry[1:3] == ["release", "edit"])
         assert "--prerelease" not in edit
         assert not any(entry[1:2] == ["api"] for entry in commands)
+        assert sorted(path.name for path in uploaded.iterdir()) == [
+            "SHA256SUMS",
+            "service-linux-amd64",
+            "service-linux-arm64",
+            "service.deb",
+            "service.rpm",
+        ]
+        assert (uploaded / "SHA256SUMS").read_text() == expected_checksums
 
         missing = await command.result(
             sys.executable,
@@ -199,6 +245,50 @@ with Path({str(log)!r}).open("a") as stream:
             work / "missing",
         ).stderr(sh.DEVNULL)
         assert missing.exit_code != 0
+
+        missing_binary = await command.result(
+            sys.executable,
+            task,
+            "--repository",
+            "example/service",
+            "--channel",
+            "nightly",
+            "--tag",
+            "nightly",
+            "--title",
+            "nightly",
+            "--revision",
+            revision,
+            "--version",
+            "1.2.3-nightly.1700000000",
+            "--asset",
+            first_asset,
+            "--binary",
+            f"service-linux-amd64={work / 'missing'}",
+        ).stderr(sh.DEVNULL)
+        assert missing_binary.exit_code != 0
+
+        duplicate = await command.result(
+            sys.executable,
+            task,
+            "--repository",
+            "example/service",
+            "--channel",
+            "nightly",
+            "--tag",
+            "nightly",
+            "--title",
+            "nightly",
+            "--revision",
+            revision,
+            "--version",
+            "1.2.3-nightly.1700000000",
+            "--asset",
+            first_asset,
+            "--binary",
+            f"service.deb={amd64_binary}",
+        ).stderr(sh.DEVNULL)
+        assert duplicate.exit_code != 0
 
     print("github release: ok")
 

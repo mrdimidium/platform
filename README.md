@@ -128,16 +128,19 @@ mise run chart -- --chart charts/service --version VERSION --app-version VERSION
 
 Finalizes an already published GitHub release: creates or edits the release,
 replaces its assets, optionally promotes an immutable image to a mutable alias,
-and updates a nightly tag only after every preceding operation succeeds. It
-accepts repository and run metadata as explicit arguments, does not read
-runner-specific variables, and assumes `gh` and Docker authentication were
-completed by the caller.
+and updates a nightly tag only after every preceding operation succeeds. Named
+binaries supplied as `NAME=PATH` are added to releases together with a
+deterministic `SHA256SUMS`. The task accepts repository and run metadata as
+explicit arguments, does not read runner-specific variables, and assumes `gh`
+and Docker authentication were completed by the caller.
 
 ```console
 mise run github-release -- \
   --repository OWNER/REPOSITORY --channel nightly --tag nightly \
   --title nightly --revision SHA --version VERSION \
   --checks-url URL --asset dist/*.deb dist/*.rpm \
+  --binary service-linux-amd64=.container/binary-amd64/service \
+  --binary service-linux-arm64=.container/binary-arm64/service \
   --image REGISTRY/IMAGE:VERSION --image-alias REGISTRY/IMAGE:nightly
 ```
 
