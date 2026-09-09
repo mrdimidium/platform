@@ -5,6 +5,7 @@ publishing, and validating projects.
 
 ## Web service
 
+- [`dimidiumlabs-config`](crates/config) loads and validates one explicitly supplied JSON, TOML, or YAML service configuration file.
 - [`dimidiumlabs-ui`](crates/ui) provides the shared design system: fonts,
   assets, design tokens, UI components, and the ordered transport-agnostic
   `AssetsCatalog`.
