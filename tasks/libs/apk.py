@@ -19,10 +19,10 @@ from shellous import sh
 from .common import TaskError, capture, run
 
 TASK = "publish"
-APK_TOOLS_VERSION = "2.14.10-r0"
+APK_TOOLS_VERSION = "2.14.10"
 APK_TOOLS_SHA256 = {
-    "x86_64": "c86e3822764e5fe19f41ce2e13553e48cac1ea4e74f858338e8d44bf0b616b61",
-    "aarch64": "3e22f80dd0272dc487e4ca84b2c6b660ca392cbad970764efe9ef9555b806ac8",
+    "x86_64": "34bb1a96f0258982377a289392d4ea9f3f4b767a4bb5806b1b87179b79ad8a1c",
+    "aarch64": "e471d35aa221d031abe9b6288aede12a8e9f1a398954e5a2e1d1bce1727b4ef4",
 }
 
 
@@ -54,20 +54,16 @@ async def apk_tool(work: Path) -> Path:
     }.get(machine)
     if apk_arch is None:
         raise TaskError(f"{TASK}: apk-tools is unavailable for {machine}")
-    archive = work / "apk-tools-static.apk"
+    tool = work / "apk.static"
     url = (
-        "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/"
-        f"{apk_arch}/apk-tools-static-{APK_TOOLS_VERSION}.apk"
+        "https://gitlab.alpinelinux.org/api/v4/projects/5/packages/generic/"
+        f"v{APK_TOOLS_VERSION}/{apk_arch}/apk.static"
     )
-    await asyncio.to_thread(urllib.request.urlretrieve, url, archive)
-    if hashlib.sha256(archive.read_bytes()).hexdigest() != APK_TOOLS_SHA256[apk_arch]:
+    await asyncio.to_thread(urllib.request.urlretrieve, url, tool)
+    if hashlib.sha256(tool.read_bytes()).hexdigest() != APK_TOOLS_SHA256[apk_arch]:
         raise TaskError(f"{TASK}: apk-tools checksum mismatch")
-    directory = work / "apk-tools"
-    directory.mkdir()
-    await run("tar", "-xzf", archive, "-C", directory, "sbin/apk.static").stderr(
-        sh.DEVNULL
-    )
-    return directory / "sbin" / "apk.static"
+    tool.chmod(0o755)
+    return tool
 
 
 async def sign_index(context, index: Path) -> None:
