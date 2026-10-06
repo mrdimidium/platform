@@ -25,10 +25,10 @@ from shellous import Result, sh
 run = sh.stdout(sh.INHERIT).stderr(sh.INHERIT)
 capture = sh.stderr(sh.INHERIT)
 APK_TOOLS_URL = (
-    "https://dl-cdn.alpinelinux.org/alpine/v3.22/main/x86_64/"
-    "apk-tools-static-2.14.10-r0.apk"
+    "https://gitlab.alpinelinux.org/api/v4/projects/5/packages/generic/"
+    "v2.14.10/x86_64/apk.static"
 )
-APK_TOOLS_SHA256 = "c86e3822764e5fe19f41ce2e13553e48cac1ea4e74f858338e8d44bf0b616b61"
+APK_TOOLS_SHA256 = "34bb1a96f0258982377a289392d4ea9f3f4b767a4bb5806b1b87179b79ad8a1c"
 
 
 def executable(path: Path, source: str) -> None:
@@ -283,20 +283,10 @@ os.execv({command!r}, [{command!r}, *sys.argv[1:]])
             None,
         )
         if apk_tool is None:
-            archive = work / "apk-tools-static.apk"
-            await asyncio.to_thread(urllib.request.urlretrieve, APK_TOOLS_URL, archive)
-            assert hashlib.sha256(archive.read_bytes()).hexdigest() == APK_TOOLS_SHA256
-            apk_directory = work / "apk-tools"
-            apk_directory.mkdir()
-            await run(
-                "tar",
-                "-xzf",
-                archive,
-                "-C",
-                apk_directory,
-                "sbin/apk.static",
-            ).stderr(sh.DEVNULL)
-            apk_tool = apk_directory / "sbin/apk.static"
+            apk_tool = work / "apk.static"
+            await asyncio.to_thread(urllib.request.urlretrieve, APK_TOOLS_URL, apk_tool)
+            assert hashlib.sha256(apk_tool.read_bytes()).hexdigest() == APK_TOOLS_SHA256
+            apk_tool.chmod(0o755)
         apk_keys = work / "apk-keys"
         apk_keys.mkdir()
         shutil.copy2(keys / f"packages.{key_version}.rsa.pub", apk_keys)
