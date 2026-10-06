@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Nikolay Govorov
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MPL-2.0
 
 [package]
 name = "dimidiumlabs-ui"
@@ -9,7 +9,7 @@ version.workspace = true
 build = "build.rs"
 authors.workspace = true
 edition.workspace = true
-license = "Apache-2.0 AND OFL-1.1"
+license = "MPL-2.0 AND OFL-1.1"
 publish.workspace = true
 homepage.workspace = true
 repository.workspace = true

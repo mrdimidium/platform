@@ -1,6 +1,6 @@
 #!/usr/bin/env -S pipx run --backend pip
 # SPDX-FileCopyrightText: 2026 Nikolay Govorov
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MPL-2.0
 # /// script
 # requires-python = ">=3.11"
 # dependencies = ["boto3==1.43.75", "shellous==0.42.0"]

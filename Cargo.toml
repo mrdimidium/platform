@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Nikolay Govorov
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MPL-2.0
 
 [workspace]
 members = ["crates/*"]
@@ -10,10 +10,10 @@ publish = false
 edition = "2024"
 rust-version = "1.97"
 version = "0.1.0"
-license = "Apache-2.0"
+license = "MPL-2.0"
 authors = ["Nikolay Govorov <me@govorov.online>"]
 homepage = "https://dimidiumlabs.io"
-repository = "https://git.dimidiumlabs.io/platform"
+repository = "https://gilti.dev/platform"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

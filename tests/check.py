@@ -1,6 +1,6 @@
 #!/usr/bin/env -S pipx run --backend pip
 # SPDX-FileCopyrightText: 2026 Nikolay Govorov
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MPL-2.0
 # /// script
 # requires-python = ">=3.11"
 # dependencies = ["shellous==0.42.0"]
@@ -36,7 +36,6 @@ async def main(args: Sequence[str]) -> None:
         target = project / "target"
         binary.mkdir()
         target.mkdir(parents=True)
-        (project / "CLA.md").write_text("Version 1.0\n")
         (project / ".mailmap").write_text("")
         (project / "Cargo.toml").write_text("[workspace]\n")
         (project / "Mirumfile").write_text("#!/bin/sh\ntrue\n")

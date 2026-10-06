@@ -1,6 +1,6 @@
 #!/usr/bin/env -S pipx run --backend pip
 # SPDX-FileCopyrightText: 2026 Nikolay Govorov
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MPL-2.0
 # fmt: off
 #MISE description="Run shared repository policy and Rust checks"
 #MISE tools={"pipx"="1.16.7","python"="3.14.7","shellcheck"="0.11.0","aqua:taiki-e/cargo-llvm-cov"="0.8.7","pipx:reuse"="6.2.0","aqua:EmbarkStudios/cargo-deny"="0.19.0"}
@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 
-from libs import licenses, signoff
+from libs import licenses
 from libs.common import TaskError, require_command, run, task_main
 
 TASK = "check"
@@ -59,7 +59,6 @@ async def main(args: Sequence[str]) -> None:
     if arguments.scope == "policy" and arguments.script:
         command.error("--script is only available with the all scope")
 
-    await signoff.check()
     await licenses.check()
     if arguments.scope == "policy":
         return

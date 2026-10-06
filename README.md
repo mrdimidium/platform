@@ -1,7 +1,9 @@
 # Dimidium Labs platform
 
 Shared Rust crates for web services and reusable `mise` tasks for building,
-publishing, and validating projects.
+publishing, and validating projects. Source code is available on
+[Gilti](https://gilti.dev/platform) and
+[GitHub](https://github.com/mrdimidium/platform).
 
 ## Web service
 
@@ -77,9 +79,9 @@ environment without storage or CI-provider credentials.
 
 ### `check`
 
-Runs contributor/signoff and licensing policy. The default `all` scope also
-runs Rust formatting, ShellCheck, Clippy, tests, optional project scripts, and
-LCOV coverage. `policy` is available to projects with a different build stack.
+Runs repository licensing policy. The default `all` scope also runs Rust
+formatting, ShellCheck, Clippy, tests, optional project scripts, and LCOV
+coverage. `policy` is available to projects with a different build stack.
 
 ```console
 mise run check
@@ -165,17 +167,6 @@ stories.
 If you are making a contribution for the first time or from a new email, please
 add yourself to the `.mailmap`.
 
-### Signoff
-
-To include your code, we ask that you read and agree to the [CLA](./CLA.md). To
-sign, add a `CLA-Version: 1.0` and a `Signed-off-by` trailer to every commit
-(`git commit -s --trailer "CLA-Version: 1.0"`). Each commit in a pull request
-must carry a valid `Signed-off-by` line matching the commit author. Please use
-your real name. We cannot include code from anonymous contributors.
-
-AI agents MUST NOT add Signed-off-by tags. Only humans can legally certify the
-Contributor License Agreement.
-
 ### AI policy
 
 You may use AI agents when writing code and documentation. AI is not allowed for
@@ -192,4 +183,4 @@ Remember, AI agents should make software better, not worse.
 ## Licensing
 
 Unless noted otherwise, software and configuration are licensed under
-Apache-2.0. Documentation is licensed under CC-BY-4.0.
+MPL-2.0. Documentation is licensed under CC-BY-4.0.

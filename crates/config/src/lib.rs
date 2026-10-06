@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Nikolay Govorov
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MPL-2.0
 
 //! Load and validate one explicitly specified service configuration file.
 

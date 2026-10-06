@@ -1,6 +1,6 @@
 #!/usr/bin/env -S pipx run --backend pip
 # SPDX-FileCopyrightText: 2026 Nikolay Govorov
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MPL-2.0
 # fmt: off
 #MISE description="Lint, package, and optionally publish a Helm chart"
 #MISE tools={"pipx"="1.16.7","python"="3.14.7","helm"="4.1.1"}

@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Nikolay Govorov
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MPL-2.0
 
 version = 1
 
@@ -13,19 +13,12 @@ SPDX-License-Identifier = "CC-BY-4.0"
 
 [[annotations]]
 path = [
-  "CLA.md",
-]
-SPDX-FileCopyrightText = "2026 Nikolay Govorov"
-SPDX-License-Identifier = "CC-BY-3.0"
-
-[[annotations]]
-path = [
   ".mailmap",
   "mise.lock",
   "Cargo.lock",
 ]
 SPDX-FileCopyrightText = "2026 Nikolay Govorov"
-SPDX-License-Identifier = "Apache-2.0"
+SPDX-License-Identifier = "MPL-2.0"
 
 [[annotations]]
 path = [

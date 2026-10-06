@@ -1,6 +1,6 @@
 #!/usr/bin/env -S pipx run --backend pip
 # SPDX-FileCopyrightText: 2026 Nikolay Govorov
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: MPL-2.0
 # fmt: off
 #MISE description="Resolve a CI-neutral Rust service release context"
 #MISE tools={"pipx"="1.16.7","python"="3.14.7"}
