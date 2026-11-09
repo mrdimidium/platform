@@ -13,13 +13,6 @@ SPDX-License-Identifier = "CC-BY-4.0"
 
 [[annotations]]
 path = [
-  "CLA.md",
-]
-SPDX-FileCopyrightText = "2026 Nikolay Govorov"
-SPDX-License-Identifier = "CC-BY-3.0"
-
-[[annotations]]
-path = [
   ".mailmap",
   "mise.lock",
   "Cargo.lock",

@@ -36,7 +36,6 @@ async def main(args: Sequence[str]) -> None:
         target = project / "target"
         binary.mkdir()
         target.mkdir(parents=True)
-        (project / "CLA.md").write_text("Version 1.0\n")
         (project / ".mailmap").write_text("")
         (project / "Cargo.toml").write_text("[workspace]\n")
         (project / "Mirumfile").write_text("#!/bin/sh\ntrue\n")
