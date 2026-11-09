@@ -402,7 +402,7 @@ mod tests {
         let toml: TransparentValues =
             toml::from_str("nonempty = ' value '\nnonblank = ' text '\npath = 'relative/path'\n")
                 .unwrap();
-        let yaml: TransparentValues = serde_yaml_ng::from_str(
+        let yaml: TransparentValues = serde_saphyr::from_str(
             "nonempty: ' value '\nnonblank: ' text '\npath: relative/path\n",
         )
         .unwrap();
@@ -436,7 +436,7 @@ mod tests {
         let toml: Set<usize> = toml::from_str("values = [3, 1, 2]")
             .map(|wrapper: TomlSet| wrapper.values)
             .unwrap();
-        let yaml: Set<usize> = serde_yaml_ng::from_str("- 3\n- 1\n- 2\n").unwrap();
+        let yaml: Set<usize> = serde_saphyr::from_str("- 3\n- 1\n- 2\n").unwrap();
 
         assert_eq!(json.as_slice(), [3, 1, 2]);
         assert_eq!(toml.as_slice(), [3, 1, 2]);

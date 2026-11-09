@@ -121,7 +121,7 @@ pub enum Error {
     },
     /// YAML decoding failed.
     Yaml {
-        source: Box<serde_yaml_ng::Error>,
+        source: Box<serde_saphyr::Error>,
         metadata: Metadata,
     },
     /// Garde validation failed.
@@ -235,7 +235,7 @@ where
             source: Box::new(source),
             metadata: metadata.clone(),
         })?,
-        Format::Yaml => serde_yaml_ng::from_str(&contents).map_err(|source| Error::Yaml {
+        Format::Yaml => serde_saphyr::from_str(&contents).map_err(|source| Error::Yaml {
             source: Box::new(source),
             metadata: metadata.clone(),
         })?,

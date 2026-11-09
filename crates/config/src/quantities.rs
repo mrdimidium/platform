@@ -268,7 +268,7 @@ mod tests {
     fn deserializes_human_readable_values_in_all_supported_formats() {
         let json: Values = serde_json::from_str(r#"{"duration":"6h","size":"10Gb"}"#).unwrap();
         let toml: Values = toml::from_str("duration = '10s'\nsize = '64 MiB'\n").unwrap();
-        let yaml: Values = serde_yaml_ng::from_str("duration: 1ms\nsize: 1KiB\n").unwrap();
+        let yaml: Values = serde_saphyr::from_str("duration: 1ms\nsize: 1KiB\n").unwrap();
 
         assert_eq!(json.duration.get().as_secs(), 6 * 60 * 60);
         assert_eq!(json.size.as_u64(), 10 * bytesize::GB);
@@ -284,8 +284,8 @@ mod tests {
         assert!(serde_json::from_str::<Values>(r#"{"duration":"10s","size":1024}"#).is_err());
         assert!(toml::from_str::<Values>("duration = 10\nsize = '1KiB'\n").is_err());
         assert!(toml::from_str::<Values>("duration = '10s'\nsize = 1024\n").is_err());
-        assert!(serde_yaml_ng::from_str::<Values>("duration: 10\nsize: 1KiB\n").is_err());
-        assert!(serde_yaml_ng::from_str::<Values>("duration: 10s\nsize: 1024\n").is_err());
+        assert!(serde_saphyr::from_str::<Values>("duration: 10\nsize: 1KiB\n").is_err());
+        assert!(serde_saphyr::from_str::<Values>("duration: 10s\nsize: 1024\n").is_err());
         assert!(serde_json::from_str::<Values>(r#"{"duration":"10s","size":"1024"}"#).is_err());
     }
 
